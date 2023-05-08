@@ -2,10 +2,13 @@
 
 Server::Server(const uint16_t READ_PORT)
     : sockVec(OPEN_SOCK)
+    , CUsers(std::make_unique<Users>())
+    , CFileSys(std::make_unique<FileSys>())
 {
+    //Запускаем сервер
     if (!start_server(READ_PORT))
     {
-        std::cout << "Can not running echo tcp server on the port " << READ_PORT << std::endl;
+        std::cout << "Can not running messanger server on the port " << READ_PORT << std::endl;
         return;
     }
 
@@ -14,16 +17,13 @@ Server::Server(const uint16_t READ_PORT)
 
 Server::~Server()
 {
-    delete serv_accept;
-    delete ep;
-    //delete sock;
 }
 
 bool Server::start_server(const uint16_t READ_PORT)
 {
     //sock = new ip::tcp::socket(service);
-    ep = new boost::asio::ip::tcp::endpoint(ip::tcp::v4(), READ_PORT);
-    serv_accept = new boost::asio::ip::tcp::acceptor(service, *ep);
+    ep = std::make_unique<boost::asio::ip::tcp::endpoint>(ip::tcp::v4(), READ_PORT);
+    serv_accept = std::make_unique<boost::asio::ip::tcp::acceptor>(service, *ep);
 
     serv_accept->listen();
 
@@ -39,6 +39,7 @@ bool Server::start_server(const uint16_t READ_PORT)
     return true;
 }
 
+//Хэндлер для обработки входящих подключений
 void Server::accepted_connection(uint16_t idxSockVec, const boost::system::error_code& ec)
 {
     if (!ec)
@@ -49,78 +50,62 @@ void Server::accepted_connection(uint16_t idxSockVec, const boost::system::error
             << sockVec[idxSockVec].clientSock->remote_endpoint().address().to_string()
             << ":" << ntohs(sockVec[idxSockVec].clientSock->remote_endpoint().port())
             << std::endl;
+        std::cout << "Access!\n";
 
-        sockVec[idxSockVec].clientSock->async_read_some(buffer(dest_buff, 256), boost::bind(&Server::logIn,
+        ////Отправляем регистрационные данные
+        //std::fstream file;
+        //file.open(dBasePath);
+        //if (!file.is_open())
+        //{
+        //    std::cout << "Cannot " << dBasePath << " open file!\n";
+        //    return;
+        //}
+
+        //std::vector<std::string> regData;
+        //std::string currentStr;
+        //while (std::getline(file, currentStr))
+        //{
+        //    regData.append(currentStr);
+        //}
+
+        write(*sockVec[idxSockVec].clientSock.get(), buffer(CUsers->getUsersList()));
+
+        //Вызываем асинхронную функцию чтения которая будет ждать входящие данные
+        sockVec[idxSockVec].clientSock->async_read_some(buffer(dest_buff, 256), boost::bind(&Server::readData,
             this, idxSockVec, boost::asio::placeholders::error, boost::asio::placeholders::bytes_transferred));
     }
     else
         std::cout << "Error async_accept\n";
 }
 
-void Server::logIn(uint16_t idxSockVec, const boost::system::error_code& ec, std::size_t bytes_transferred)
+
+//Коды запросав для сервера. Сервер отвечает на выполненный запрос кодом 0x00 и на невыполненный 0xFF
+// 0x01 - Записать данные нового пользователя в базу данных, 0x02 - просьба авторизовать пользователя 
+void Server::readData(uint16_t idxSockVec, const boost::system::error_code& ec, std::size_t bytes_transferred)
 {
     if (bytes_transferred > 0)
     {
-        //if (cmp_chartostr(dest_buff, CMD_EXT, bytes_transferred))
-        //{
-        //    std::cout << "Echo server has been stopped ...\n";
-        //    return;
-        //}
-
         std::string userId(dest_buff);
-        size_t idxSeparatItem = userId.find('@');
-        size_t idxSeparatNext = 0;
+        uint8_t request = userId.at(userId.size() - 1);
+        userId.pop_back();
 
-        if (idxSeparatItem == std::string::npos)
-            return;
-
-        std::string userLogin(userId.substr(0, idxSeparatItem));
-        std::string userPassword(userId.substr(idxSeparatItem+1));
-
-        std::fstream file;
-        if (!loadDBase(file))
+        switch(request)
         {
-            std::cout << "Error loading database\n";
-            return;
+            case 0x01:
+                CFileSys->writeEndFile(regDB, userId);
+                //if(CFileSys->writeEndFile(regDB, userId) != errOpenFile)
+                //    write(*sockVec[idxSockVec].clientSock.get(), buffer((char*)ANSWER_SUCCESS, 1));
+                //else
+                //    write(*sockVec[idxSockVec].clientSock.get(), buffer((char*)ANSWER_FAILED, 1));
+                break;
+            
+            case 0x02:
+                break;
+
+            default:
+                break;
+
         }
-
-        //const uint16_t SZ = 99;
-        //char buff[SZ]{};
-        //file.getline(buff, SZ, '@');
-        //std::string userString = buff;
-
-        std::string userString;
-        while (!file.eof())
-        {
-            std::getline(file, userString);
-            int itemPos = file.tellg();
-            idxSeparatItem = userString.find('@');
-            if (idxSeparatItem == std::string::npos)
-                return;
-
-            //userString.substr(userString[0], idxSeparatItem);
-
-            if ((userLogin == userString.substr(0, idxSeparatItem)))
-            {
-                idxSeparatNext = userString.find('@', idxSeparatItem + 1);
-                if (idxSeparatNext == std::string::npos)
-                    return;
-
-                if (userPassword == userString.substr(idxSeparatItem + 1, idxSeparatNext - (idxSeparatItem + 1)))
-                {
-                    sockVec[idxSockVec].isReg = true;
-                    int itemPos = file.tellg();
-                    file.seekg(itemPos - 3);
-                    itemPos = file.tellg();
-                    //Устанавливаем флаг онлайн
-                    file << '1';
-                    file.close();
-                    std::cout << "Access\n";
-                    break;
-                }
-            }
-        }
-
     }
     else if (bytes_transferred == 0)
     {
@@ -135,19 +120,19 @@ void Server::logIn(uint16_t idxSockVec, const boost::system::error_code& ec, std
 
 bool Server::loadDBase(std::fstream& file)
 {
-    file.open(dBasePath, std::ios::in | std::ios::out);
+    file.open(regDB, std::ios::in | std::ios::out | std::ios::app);
 
     if (!file)
         return false;
 
-    std::string sig;
-    std::getline(file, sig);
-    if (sig != "Database")
-    {
-        file.close();
-        std::cout << "Database is corrupted!\n";
-        return false;
-    }
+    //std::string sig;
+    //std::getline(file, sig);
+    //if (sig != "Database")
+    //{
+    //    file.close();
+    //    std::cout << "Database is corrupted!\n";
+    //    return false;
+    //}
     
     return true;
 }
