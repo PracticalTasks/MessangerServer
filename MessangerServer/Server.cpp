@@ -79,7 +79,7 @@ void Server::accepted_connection(uint16_t idxSockVec, const boost::system::error
 }
 
 
-//Коды запросав для сервера. Сервер отвечает на выполненный запрос кодом 0x00 и на невыполненный 0xFF
+//Коды запросав для сервера. Сервер отвечает на выполненный запрос кодом 0xEF и на невыполненный 0xFF
 // 0x01 - Записать данные нового пользователя в базу данных, 0x02 - просьба авторизовать пользователя 
 void Server::readData(uint16_t idxSockVec, const boost::system::error_code& ec, std::size_t bytes_transferred)
 {
@@ -100,6 +100,17 @@ void Server::readData(uint16_t idxSockVec, const boost::system::error_code& ec, 
                 break;
             
             case 0x02:
+                if (checkUserAuth(userId))
+                {
+                    sockVec[idxSockVec].isReg = true;
+                    char buff[] = { ANSWER_SUCCESS };
+                    write(*sockVec[idxSockVec].clientSock.get(), buffer(buff));
+                }
+                else
+                {
+                    char buff[] = { ANSWER_FAILED };
+                    write(*sockVec[idxSockVec].clientSock.get(), buffer(buff));
+                }
                 break;
 
             default:
@@ -114,9 +125,47 @@ void Server::readData(uint16_t idxSockVec, const boost::system::error_code& ec, 
             << sockVec[idxSockVec].clientSock->remote_endpoint().address().to_string()
             << ":" << ntohs(sockVec[idxSockVec].clientSock->remote_endpoint().port())
             << " disconnected" << std::endl;
+        //sockVec.erase(sockVec.begin() + idxSockVec);
         --connectCount;
+        return;
     }
+
+    //Обнуляем буффер для приёма данных
+    for (int i = 0; i < DEST_BUFFSZ; ++i)
+        dest_buff[i] = 0;
+    
+    //Вызываем асинхронную функцию чтения которая будет ждать входящие данные
+    sockVec[idxSockVec].clientSock->async_read_some(buffer(dest_buff, 256), boost::bind(&Server::readData,
+        this, idxSockVec, boost::asio::placeholders::error, boost::asio::placeholders::bytes_transferred));
 }
+
+bool Server::checkUserAuth(std::string data)
+{
+    std::string userId = data.substr(0, data.find(':'));
+    std::string regData;
+    CFileSys->readFile(regDB, regData);
+    //Проверяем есть ли данные пользователя(логин оканчивается ':')
+    int currentIdx = regData.find(userId + ':');
+    int nextIdx = 0;
+
+    if (currentIdx != -1)
+    {
+        //Увеличеваем текущий idx на количество символов в логине + ':'
+        currentIdx += userId.size() + 1;
+        //После ':' находится пароль и заканчивается '@'
+        nextIdx = regData.find('@', currentIdx);
+        nextIdx -= currentIdx;
+
+        userId = regData.substr(currentIdx, nextIdx);
+
+        std::string password = data.substr(data.find(':') + 1, (data.size() - 1) - (data.find(':') + 1));
+        if (userId == password)
+            return true;
+    }
+
+    return false;
+}
+
 
 bool Server::loadDBase(std::fstream& file)
 {

@@ -1,7 +1,7 @@
 #pragma once
 #include <iostream>
 #include <fstream>
-//#include <string>
+#include <vector>
 
 #include <boost/bind.hpp>
 #include <boost/asio.hpp>
@@ -12,7 +12,7 @@
 using namespace boost::asio;
 
 #define DEST_BUFFSZ 256
-#define ANSWER_SUCCESS 0
+#define ANSWER_SUCCESS 0xEF
 #define ANSWER_FAILED 0xFF
 const uint16_t OPEN_SOCK = 10;
 
@@ -41,6 +41,9 @@ private:
 	void insert_sizefile_tobuff(std::vector<char>& buff, int32_t val);
 
 	void readData(uint16_t idxSockVec, const boost::system::error_code& ec, std::size_t bytes_transferred);
+
+	bool checkUserAuth(std::string data);
+
 
 private:
 	io_service service;

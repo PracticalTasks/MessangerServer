@@ -12,7 +12,8 @@ int32_t FileSys::readFile(std::string& nameFile, std::string& buff)
 		return errOpenFile;
 	
 	std::getline(*file, buff);
-	
+	file->close();
+
 	return buff.size();
 }
 
